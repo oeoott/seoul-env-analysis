@@ -2,6 +2,7 @@
 본 프로젝트는 서울시 공공데이터를 활용하여 녹지 공간(공원)과 대기질(미세먼지)의 상관관계, 그리고 환경 지표가 시민들의 친환경 교통수단(따릉이) 이용에 미치는 영향을 데이터로 증명하는 대시보드입니다.
 
 
+
 🔗 프로젝트 결과물
 
 Streamlit 배포 주소: https://seoul-env-analysis-n8kcxebemataxd5namye53.streamlit.app/
