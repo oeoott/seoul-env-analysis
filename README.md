@@ -6,6 +6,7 @@
 🔗 프로젝트 링크
 Streamlit 배포 주소: https://seoul-env-analysis-n8kcxebemataxd5namye53.streamlit.app/
 Google AI Studio 
+
 프롬프트 공유 링크: https://aistudio.google.com/app/prompts?state=%7B%22ids%22:%5B%2213Epzhez-8zjdqFw5apeKHCFVvpmLLp1V%22%5D,%22action%22:%22open%22,%22userId%22:%22113754665981630837132%22,%22resourceKeys%22:%7B%7D%7D&usp=sharing
 
 🛠️ 기술 스택 및 개발 환경
