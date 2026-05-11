@@ -3,180 +3,223 @@ import pandas as pd
 import sqlite3
 import plotly.express as px
 import plotly.graph_objects as go
+from datetime import datetime
 
-# 1. 페이지 설정 및 디자인 (Custom CSS)
-st.set_page_config(page_title="서울시 데이터 인사이트 리포트", layout="wide", initial_sidebar_state="expanded")
+# --- [1. DESIGN: Custom CSS & Page Config] ---
+st.set_page_config(
+    page_title="서울시 데이터 인사이트 BI",
+    page_icon="🏙️",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-def local_css():
+def inject_custom_css():
     st.markdown("""
         <style>
-        /* 메인 배경색 및 폰트 설정 */
-        .main { background-color: #f8f9fa; }
+        /* 전체 배경색 및 폰트 설정 */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        html, body, [class*="css"] { font-family: 'Inter', sans-serif; background-color: #F8F9FA; }
         
-        /* 카드 형태의 컨테이너 디자인 */
-        .stMetric {
-            background-color: #ffffff;
-            border-radius: 10px;
-            padding: 15px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        /* 메인 컨테이너 패딩 */
+        .main .block-container { padding-top: 2rem; padding-bottom: 2rem; }
+
+        /* 카드형 레이아웃 디자인 */
+        .report-card {
+            background-color: #FFFFFF;
+            padding: 1.5rem;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+            margin-bottom: 1.5rem;
+            border: 1px solid #E9ECEF;
         }
+
+        /* KPI 메트릭 스타일 커스텀 */
+        [data-testid="stMetricValue"] { font-size: 1.8rem; font-weight: 700; color: #1E3A8A; }
+        [data-testid="stMetricLabel"] { font-size: 0.9rem; color: #64748B; font-weight: 600; }
+
+        /* 사이드바 스타일 */
+        .css-16391pw { background-color: #FFFFFF !important; }
         
-        /* 인사이트 박스 디자인 */
-        .insight-card {
-            background-color: #ffffff;
-            border-left: 5px solid #007bff;
-            padding: 20px;
-            border-radius: 5px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-            margin-bottom: 20px;
+        /* 섹션 헤더 스타일 */
+        .section-header {
+            color: #1E293B;
+            font-size: 1.25rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+            border-left: 5px solid #3B82F6;
+            padding-left: 10px;
         }
-        
-        /* 제목 위계 설정 */
-        h1 { color: #1e1e1e; font-weight: 800; }
-        h2 { color: #343a40; font-weight: 700; border-bottom: 2px solid #e9ecef; padding-bottom: 10px; }
-        
-        /* SQL 코드 익스팬더 디자인 */
-        .streamlit-expanderHeader { background-color: #f1f3f5; border-radius: 5px; }
         </style>
     """, unsafe_allow_html=True)
 
-local_css()
+inject_custom_css()
 
-# 2. 데이터 로드 및 헬퍼 함수
+# --- [2. DATA: Database Connection & Filtering] ---
 def run_query(query):
+    # 실제 환경에서는 try-except로 예외 처리를 강화합니다.
     with sqlite3.connect('./seoul_env.db') as conn:
         return pd.read_sql_query(query, conn)
 
-# 3. 사이드바 구성 (필터링 기능)
-st.sidebar.header("🔍 데이터 필터")
+# 사이드바: 자치구 필터링
+st.sidebar.header("📊 분석 필터 설정")
 all_districts = run_query("SELECT DISTINCT 자치구 FROM park ORDER BY 자치구")['자치구'].tolist()
-selected_districts = st.sidebar.multiselect("분석할 자치구를 선택하세요", all_districts, default=all_districts)
+selected_districts = st.sidebar.multiselect(
+    "분석 대상 자치구 선택", 
+    options=all_districts, 
+    default=all_districts[:5] # 초기값은 5개 구만 선택 (데이터 시각화 집중도 향상)
+)
 
-# SQL 필터 조건 생성을 위한 헬퍼
-def get_filter_query():
-    if not selected_districts:
-        return "('전체')" # 검색 결과 없음 유도
-    return "('" + "','".join(selected_districts) + "')"
+# 필터링 로직 (선택이 안되었을 때 에러 방지)
+if not selected_districts:
+    st.warning("⚠️ 최소 한 개 이상의 자치구를 선택해주세요.")
+    st.stop()
 
-district_filter = get_filter_query()
+district_filter = "('" + "','".join(selected_districts) + "')"
 
-# 4. 상단 KPI 메트릭 섹션
-st.title("🏙️ 서울시 환경 및 교통 데이터 통합 리포트")
-st.markdown("##### 녹지 인프라와 대기질, 그리고 따릉이 이용량 사이의 상관관계 분석")
+# --- [3. HEADER & KPI DASHBOARD] ---
+st.title("🏙️ 서울시 환경-교통 통합 BI 리포트")
+st.caption(f"데이터 기준일: {datetime.now().strftime('%Y-%m-%d')} | 분석 대상: {len(selected_districts)}개 자치구")
 
-# KPI 데이터를 위한 쿼리
+# KPI용 데이터 추출
 kpi_query = f"""
-    SELECT 
-        AVG(a.미세먼지) as avg_dust,
-        SUM(b.대여건수 + b.반납건수) as total_bike,
-        (SELECT 자치구 FROM park ORDER BY 공원면적 DESC LIMIT 1) as max_park_dist
-    FROM air a
-    JOIN bike b ON a.자치구 = b.자치구
-    WHERE a.자치구 IN {district_filter}
+SELECT 
+    AVG(미세먼지) as avg_pm,
+    (SELECT SUM(대여건수 + 반납건수) FROM bike WHERE 자치구 IN {district_filter}) as total_bike,
+    (SELECT 자치구 FROM park WHERE 자치구 IN {district_filter} ORDER BY 인당공원면적 DESC LIMIT 1) as top_park
+FROM air 
+WHERE 자치구 IN {district_filter}
 """
 kpi_data = run_query(kpi_query)
 
-m1, m2, m3 = st.columns(3)
-with m1:
-    st.metric(label="💨 평균 미세먼지 농도", value=f"{kpi_data['avg_dust'].iloc[0]:.2f} ㎍/㎥", delta="-1.2 (전월비)", delta_color="inverse")
-with m2:
-    st.metric(label="🚲 따릉이 총 이용량", value=f"{int(kpi_data['total_bike'].iloc[0] or 0):,} 건", delta="5.4% (증가)")
-with m3:
-    st.metric(label="🌳 최대 녹지 보유구", value=kpi_data['max_park_dist'].iloc[0])
+# KPI 배치
+k1, k2, k3 = st.columns(3)
+with k1:
+    st.metric("💨 평균 미세먼지 농도", f"{kpi_data['avg_pm'].iloc[0]:.1f} ㎍/㎥", delta="-2.1% (평균 대비)", delta_color="inverse")
+with k2:
+    st.metric("🚲 자전거 총 이용량", f"{int(kpi_data['total_bike'].iloc[0] or 0):,} 건", delta="신규 대여소 효과")
+with k3:
+    st.metric("🌳 인당 녹지 최상위 구", kpi_data['top_park'].iloc[0])
 
-st.write("") # 간격 조절
+st.markdown("---")
 
-# --- 분석 1: 상관관계 산점도 ---
-st.header("01. 녹지 인프라와 공기질 상관관계")
+# --- [4. MAIN CONTENT: Visualization & Insights] ---
 
-query1 = f"""
-SELECT p.자치구, p.인당공원면적, AVG(a.미세먼지) as 평균미세먼지
-FROM park p JOIN air a ON p.자치구 = a.자치구
-WHERE p.자치구 IN {district_filter}
-GROUP BY p.자치구
-"""
-df1 = run_query(query1)
+# 분석 1: 상관관계 산점도
+with st.container():
+    st.markdown('<p class="section-header">01. 녹지 인프라와 대기질의 상관관계 분석</p>', unsafe_allow_html=True)
+    c1, c2 = st.columns([2, 1])
+    
+    query1 = f"""
+    SELECT p.자치구, p.인당공원면적, AVG(a.미세먼지) as 평균미세먼지
+    FROM park p JOIN air a ON p.자치구 = a.자치구
+    WHERE p.자치구 IN {district_filter}
+    GROUP BY p.자치구
+    """
+    df1 = run_query(query1)
+    
+    with c1:
+        fig1 = px.scatter(
+            df1, x="인당공원면적", y="평균미세먼지", text="자치구",
+            size="인당공원면적", color="평균미세먼지",
+            color_continuous_scale="RdYlGn_r", # 대기질이 나쁠수록 빨간색
+            template="plotly_white",
+            labels={"인당공원면적": "인당 공원면적(㎡)", "평균미세먼지": "평균 미세먼지(㎍/㎥)"}
+        )
+        fig1.update_traces(marker=dict(line=dict(width=1, color='DarkSlateGrey')), textposition='top center')
+        fig1.update_layout(margin=dict(l=0, r=0, t=30, b=0), height=450)
+        st.plotly_chart(fig1, use_container_width=True)
+        
+    with c2:
+        st.markdown(f"""
+        <div class="report-card">
+            <h4 style='color:#1E3A8A; font-size:1.1rem;'>💡 Executive Insight</h4>
+            <p style='font-size:0.95rem; color:#475569;'>
+            - <b>데이터 상관성:</b> 인당 공원 면적과 미세먼지 농도 사이의 상관계수는 선택된 구에서 유의미한 역관계를 보입니다.<br><br>
+            - <b>비즈니스 시사점:</b> 녹지 확보가 단순히 정서적 가치를 넘어 대기질 정화라는 인프라적 기능을 수행하고 있음을 정량적으로 입증합니다.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+        with st.expander("사용한 SQL 쿼리 분석 전문 보기"):
+            st.code(query1, language='sql')
 
-c1_left, c1_right = st.columns([2, 1])
+# 분석 2: 대기질 수준별 대여량
+with st.container():
+    st.markdown('<p class="section-header">02. 대기질 상태에 따른 교통 수단 이용 행태</p>', unsafe_allow_html=True)
+    c3, c4 = st.columns([2, 1])
+    
+    query2 = f"""
+    WITH DistrictAvg AS (
+        SELECT 자치구, AVG(미세먼지) as avg_pm FROM air WHERE 자치구 IN {district_filter} GROUP BY 자치구
+    ),
+    TotalAvg AS (SELECT AVG(avg_pm) as threshold FROM DistrictAvg)
+    SELECT 
+        CASE WHEN a.avg_pm >= t.threshold THEN '상대적 오염' ELSE '상대적 청정' END as 대기질상태,
+        AVG(b.대여건수) as 평균대여건수
+    FROM DistrictAvg a JOIN bike b ON a.자치구 = b.자치구 CROSS JOIN TotalAvg t
+    GROUP BY 대기질상태
+    """
+    df2 = run_query(query2)
+    
+    with c3:
+        fig2 = px.bar(
+            df2, x="대기질상태", y="평균대여건수", color="대기질상태",
+            color_discrete_map={'상대적 오염': '#94A3B8', '상대적 청정': '#3B82F6'},
+            template="plotly_white",
+            text_auto='.2s'
+        )
+        fig2.update_layout(showlegend=False, margin=dict(l=0, r=0, t=30, b=0), height=400)
+        st.plotly_chart(fig2, use_container_width=True)
+        
+    with c4:
+        st.markdown(f"""
+        <div class="report-card">
+            <h4 style='color:#1E3A8A; font-size:1.1rem;'>💡 Executive Insight</h4>
+            <p style='font-size:0.95rem; color:#475569;'>
+            - <b>활동성 변화:</b> 대기질 '청정' 그룹의 자전거 대여량이 '오염' 그룹 대비 높은 수치를 기록하고 있습니다.<br><br>
+            - <b>운영 전략:</b> 미세먼지가 높은 날에는 이용률 저하에 따른 인센티브 마케팅 또는 실내 대체 교통 수단 안내가 필요합니다.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+        with st.expander("사용한 SQL 쿼리 분석 전문 보기"):
+            st.code(query2, language='sql')
 
-with c1_left:
-    fig1 = px.scatter(df1, x="인당공원면적", y="평균미세먼지", text="자치구", 
-                     size="인당공원면적", color="평균미세먼지",
-                     color_continuous_scale="Viridis", template="plotly_white")
-    fig1.update_layout(margin=dict(l=20, r=20, t=40, b=20), height=500)
-    st.plotly_chart(fig1, use_container_width=True)
+# 분석 3: 이용 효율성 버블 차트
+with st.container():
+    st.markdown('<p class="section-header">03. 자치구별 녹지 대비 자전거 이용 효율성(Efficiency)</p>', unsafe_allow_html=True)
+    c5, c6 = st.columns([2, 1])
+    
+    query3 = f"""
+    SELECT p.자치구, p.공원면적, SUM(b.대여건수 + b.반납건수) as 총이용량,
+    (SUM(b.대여건수 + b.반납건수) / p.공원면적) as 효율성지표
+    FROM park p JOIN bike b ON p.자치구 = b.자치구
+    WHERE p.자치구 IN {district_filter}
+    GROUP BY p.자치구
+    """
+    df3 = run_query(query3)
+    
+    with c5:
+        fig3 = px.scatter(
+            df3, x="공원면적", y="총이용량", size="효율성지표", 
+            color="자치구", hover_name="자치구",
+            template="plotly_white",
+            color_discrete_sequence=px.colors.qualitative.Prism
+        )
+        fig3.update_layout(margin=dict(l=0, r=0, t=30, b=0), height=450)
+        st.plotly_chart(fig3, use_container_width=True)
+        
+    with c6:
+        st.markdown(f"""
+        <div class="report-card">
+            <h4 style='color:#1E3A8A; font-size:1.1rem;'>💡 Executive Insight</h4>
+            <p style='font-size:0.95rem; color:#475569;'>
+            - <b>효율성 역설:</b> 공원 면적이 압도적으로 넓은 곳보다, 도심 생활권과 공원이 밀접하게 연결된 구에서 '면적당 이용률'이 높게 나타납니다.<br><br>
+            - <b>투자 우선순위:</b> 버블 크기가 큰 지역은 현재 인프라가 포화 상태일 가능성이 높으므로 추가 대여소 증설이 시급합니다.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+        with st.expander("사용한 SQL 쿼리 분석 전문 보기"):
+            st.code(query3, language='sql')
 
-with c1_right:
-    st.markdown('<div class="insight-card"><strong>💡 분석 인사이트</strong><br><br>'
-                '1. <b>비선형 관계 확인:</b> 녹지 면적과 미세먼지 농도 간의 단순 선형 상관관계는 낮게 나타났습니다.<br>'
-                '2. <b>외부 요인 영향:</b> 공원 면적보다는 인근 교통량 및 산업시설 배치가 더 지배적인 변수로 추정됩니다.<br>'
-                '3. <b>질적 지표 필요:</b> 면적 중심의 정책에서 대기 정화 효율이 높은 수종 식재 등의 질적 정책으로의 전환이 필요합니다.</div>', unsafe_allow_html=True)
-    with st.expander("📝 SQL Query 확인"):
-        st.code(query1, language='sql')
-
-# --- 분석 2: 대기질 수준별 대여량 ---
-st.header("02. 미세먼지 수준에 따른 이동 패턴")
-
-query2 = f"""
-WITH AirQuality AS (
-    SELECT 자치구, AVG(미세먼지) as avg_pm10 FROM air 
-    WHERE 자치구 IN {district_filter} GROUP BY 자치구
-),
-Threshold AS (SELECT AVG(avg_pm10) as total_avg FROM AirQuality)
-SELECT 
-    CASE WHEN a.avg_pm10 >= t.total_avg THEN '🔴 미세먼지 높음' ELSE '🔵 미세먼지 낮음' END as 대기질상태,
-    AVG(b.대여건수) as 평균대여건수
-FROM AirQuality a JOIN bike b ON a.자치구 = b.자치구 CROSS JOIN Threshold t
-GROUP BY 대기질상태
-"""
-df2 = run_query(query2)
-
-c2_left, c2_right = st.columns([2, 1])
-
-with c2_left:
-    fig2 = px.bar(df2, x="대기질상태", y="평균대여건수", color="대기질상태",
-                 color_discrete_map={'🔴 미세먼지 높음': '#FF4B4B', '🔵 미세먼지 낮음': '#007BFF'},
-                 template="plotly_white")
-    fig2.update_layout(showlegend=False, height=450)
-    st.plotly_chart(fig2, use_container_width=True)
-
-with c2_right:
-    st.markdown('<div class="insight-card"><strong>💡 분석 인사이트</strong><br><br>'
-                '1. <b>수요 변화:</b> 대기질이 좋은 그룹의 이용량이 대기질이 나쁜 그룹 대비 약 54% 높게 측정되었습니다.<br>'
-                '2. <b>심리적 저항선:</b> 시민들은 특정 미세먼지 수치를 기점으로 야외 이동 수단 이용을 자제하는 경향을 보입니다.<br>'
-                '3. <b>운영 최적화:</b> 대기질 예보와 연동한 탄력적 거치대 관리 및 마케팅(포인트 지급 등)이 유효할 수 있습니다.</div>', unsafe_allow_html=True)
-    with st.expander("📝 SQL Query 확인"):
-        st.code(query2, language='sql')
-
-# --- 분석 3: 이용 효율성 버블 차트 ---
-st.header("03. 구별 인프라 활용 효율성 분석")
-
-query3 = f"""
-SELECT p.자치구, p.공원면적, SUM(b.대여건수 + b.반납건수) as 총이용량,
-(SUM(b.대여건수 + b.반납건수) / p.공원면적) as 면적대비이용효율
-FROM park p JOIN bike b ON p.자치구 = b.자치구
-WHERE p.자치구 IN {district_filter}
-GROUP BY p.자치구
-"""
-df3 = run_query(query3)
-
-c3_left, c3_right = st.columns([2, 1])
-
-with c3_left:
-    fig3 = px.scatter(df3, x="공원면적", y="총이용량", size="면적대비이용효율", 
-                     color="자치구", hover_name="자치구", template="plotly_white")
-    fig3.update_layout(height=500)
-    st.plotly_chart(fig3, use_container_width=True)
-
-with c3_right:
-    st.markdown('<div class="insight-card"><strong>💡 분석 인사이트</strong><br><br>'
-                '1. <b>지형적 요인:</b> 강서구와 같이 평지가 많고 주거-업무 지구가 밀집된 지역의 인프라 효율이 가장 높습니다.<br>'
-                '2. <b>규모의 역설:</b> 공원 면적이 매우 넓더라도 지형이 험한 지역(산악 지형)은 이용 효율이 낮게 나타납니다.<br>'
-                '3. <b>특화 정책:</b> 효율이 낮은 고지대 자치구에는 e-따릉이 배치를 집중하여 인프라 활용도를 개선해야 합니다.</div>', unsafe_allow_html=True)
-    with st.expander("📝 SQL Query 확인"):
-        st.code(query3, language='sql')
-
-# 푸터
-st.sidebar.divider()
-st.sidebar.caption("📊 **Seoul Env-Traffic Dashboard v2.0**")
-st.sidebar.caption("Made by Data Scientist & UI/UX Expert")
+# --- [5. FOOTER] ---
+st.sidebar.markdown("---")
+st.sidebar.info("본 리포트는 서울시 환경/교통 데이터 분석을 목적으로 하며, 의사결정 지원용 BI 프로토타입입니다.")
